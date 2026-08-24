@@ -1,0 +1,19 @@
+[tools]
+go = "1.26.0"
+golangci-lint = "2.12.2"
+
+[tasks.build]
+description = "Build the SDK"
+run = "go build ./..."
+
+[tasks.test]
+description = "Run tests"
+run = "go test ./... -race -cover"
+
+[tasks.lint]
+description = "Run golangci-lint"
+run = "golangci-lint run ./..."
+
+[tasks.check]
+description = "Build, test, and lint"
+depends = ["build", "test", "lint"]

@@ -1,0 +1,110 @@
+version: 2
+repo: ""
+default_branch: main
+kilroy:
+  binary_path: kilroy
+  provider: ""
+  model: ""
+  backend: cli
+  timeout: 4h
+  quota_backoff: false
+  stage_cleanup_enabled: null
+  stage_cleanup_interval: 0s
+  stall_timeout: 15m
+  stall_retries: 100
+  preflight_retries: null
+  preflight_retry_delay: null
+  provider_failure_retries: null
+  provider_failure_retry_delay: null
+  failure_cycle_limit: 0
+  modeldb_path: ~/.cache/kilroy/modeldb_suggest.json
+  planner_model: ""
+  task_parser_model: ""
+  implementer_model: ""
+  code_reviewer_model: ""
+  task_completer_model: ""
+  final_reviewer_model: ""
+  cicd_investigator_model: ""
+  comment_triage_model: ""
+github:
+  owner: defakto-security
+  repo: spiffe-defakto-go
+  issue_polling_interval: 5m
+  issue_ready_label: ""
+  issue_failed_label: ""
+  pr_watch_label: ""
+  pr_failed_label: ""
+  pr_polling_interval: 5m
+  pr_working_ttl: 0s
+  closed_pr_audit_interval: 0s
+  closed_pr_audit_lookback_days: 0
+  closed_pr_audit_max_prs: 0
+  max_issue_attempts: null
+  max_pr_attempts: null
+  issue_triage_interval: 5m
+  issue_triage_label: ""
+  draft_prs: true
+  auto_add_review_label: false
+  pr_actions:
+    comments: null
+    conflict: null
+    merge: false
+    cicd: null
+  pr_cicd_filter:
+    target: []
+    ignore: []
+    only_required: null
+  pr_auto_merge:
+    enabled: null
+    strategy: ""
+  issue_scheduler_enabled: true
+  issue_scheduler_interval: 5m
+  issue_scheduler_label: ""
+linear:
+  api_key: ""
+  update_status: false
+  update_state: null
+watcher:
+  enabled: false
+  poll_interval: 0s
+  investigation_retention_days: null
+code_review_loop:
+  enabled: false
+  interval_minutes: 60
+  artifact_retention_days: null
+config_watcher:
+  enabled: null
+  interval: 0s
+workflow_watcher: []
+review:
+  enabled: true
+  label: ""
+  polling_interval: 10m
+  auto_trigger: true
+  run_on_drafts: false
+  cooldown: 168h
+readme_watcher:
+  enabled: false
+  interval: 0s
+  stale_after: 0s
+log_watcher:
+  enabled: false
+  poll_interval: 0s
+  sample_window: 0s
+  report_retention_days: null
+  sources:
+    daemon_log: null
+    kilroy_item_logs: null
+flaky_detector:
+  enabled: false
+  poll_interval: 0s
+  runs_lookback: 0s
+  report_retention_days: 0
+approve:
+  enabled: true
+  auto_trigger: true
+  trigger_label: orch:request-approval
+  humanreview_label: orch:human-review
+  ignore_ci_checks: true
+  cooldown: 168h
+  polling_interval: 20m
