@@ -1,6 +1,7 @@
 [tools]
 go = "1.26.0"
 golangci-lint = "2.12.2"
+protobuf = "35.1"
 
 [tasks.build]
 description = "Build the SDK"
@@ -13,6 +14,10 @@ run = "go test ./... -race -cover"
 [tasks.lint]
 description = "Run golangci-lint"
 run = "golangci-lint run ./..."
+
+[tasks.gen-protos]
+description = "Regenerate Go stubs from the vendored .proto files"
+run = "./scripts/gen_protos.sh"
 
 [tasks.check]
 description = "Build, test, and lint"

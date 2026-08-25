@@ -1,0 +1,161 @@
+syntax = "proto3";
+
+package com.spirl.serverless.alpha;
+
+// Vendored from spirl/spirl:protos/agent/alpha/serverlessapi/api.proto.
+// See README.md "Updating the vendored proto" for the update process.
+option go_package = "github.com/defakto-security/spiffe-defakto-go/attestingworkloadapi/internal/serverlessapi";
+
+service SpiffeWorkloadAPI {
+  rpc FetchX509SVID(FetchX509SVIDRequest) returns (FetchX509SVIDResponse);
+  rpc FetchX509Bundles(FetchX509BundlesRequest) returns (FetchX509BundlesResponse);
+  rpc FetchJWTSVID(FetchJWTSVIDRequest) returns (FetchJWTSVIDResponse);
+  rpc FetchJWTBundles(FetchJWTBundlesRequest) returns (FetchJWTBundlesResponse);
+}
+
+/////////////////////////////////////////////////////////////////////////
+// Attestation (shared across all RPCs)
+/////////////////////////////////////////////////////////////////////////
+
+message MethodAttestation {
+  // Required. The type of attestation method being used.
+  string method_type = 1;
+
+  // Required. The version of the attestation method being used.
+  string method_version = 2;
+
+  // Required. The attestation data to be used for the specified method type.
+  bytes evidence = 3;
+}
+
+/////////////////////////////////////////////////////////////////////////
+// X.509-SVID
+/////////////////////////////////////////////////////////////////////////
+
+message FetchX509SVIDRequest {
+  // Required. The attestation data of the workload.
+  repeated MethodAttestation attestations = 1;
+
+  // Optional. The ID of the serverless cluster whose policy set should
+  // authorize this request (RFD-194). Empty selects the trust-domain-scoped
+  // policy set (backward-compatible).
+  string cluster_id = 2;
+}
+
+message FetchX509SVIDResponse {
+  // Optional. Only set if all required attestations were satisfied.
+  X509SVIDResult x509_svids = 1;
+}
+
+message X509SVIDResult {
+  // Required. A list of X509SVID messages, each of which includes a single
+  // X.509-SVID, its private key, and the bundle for the trust domain.
+  repeated X509SVID svids = 1;
+
+  // Optional. CA certificate bundles belonging to foreign trust domains that
+  // the workload should trust, keyed by the SPIFFE ID of the foreign trust
+  // domain. Bundles are ASN.1 DER encoded.
+  map<string, bytes> federated_bundles = 2;
+}
+
+message X509SVID {
+  string spiffe_id = 1;
+  bytes x509_svid = 2;
+  bytes x509_svid_key = 3;
+  bytes bundle = 4;
+  string hint = 5;
+}
+
+/////////////////////////////////////////////////////////////////////////
+// X.509 Bundles
+/////////////////////////////////////////////////////////////////////////
+
+message FetchX509BundlesRequest {
+  // Required. The attestation data of the workload.
+  repeated MethodAttestation attestations = 1;
+
+  // Optional. The ID of the serverless cluster whose policy set should
+  // authorize this request (RFD-194). Empty selects the trust-domain-scoped
+  // policy set (backward-compatible).
+  string cluster_id = 2;
+}
+
+message FetchX509BundlesResponse {
+  // Optional. Only set if all required attestations were satisfied.
+  X509BundlesResult bundles = 1;
+}
+
+message X509BundlesResult {
+  // Required. CA certificate bundles belonging to trust domains that the
+  // workload should trust, keyed by the SPIFFE ID of the trust domain.
+  // Bundles are ASN.1 DER encoded.
+  map<string, bytes> bundles = 1;
+}
+
+/////////////////////////////////////////////////////////////////////////
+// JWT-SVID
+/////////////////////////////////////////////////////////////////////////
+
+message FetchJWTSVIDRequest {
+  // Required. The attestation data of the workload.
+  repeated MethodAttestation attestations = 1;
+
+  // Required. The audience for the JWT-SVID.
+  repeated string audience = 2;
+
+  // Optional. The SPIFFE ID of the workload.
+  string spiffe_id = 3;
+
+  // Optional. The ID of the serverless cluster whose policy set should
+  // authorize this request (RFD-194). Empty selects the trust-domain-scoped
+  // policy set (backward-compatible).
+  string cluster_id = 4;
+}
+
+message FetchJWTSVIDResponse {
+  // Optional. Only set if all required attestations were satisfied.
+  JWTSVIDResult jwt_svids = 1;
+}
+
+message JWTSVIDResult {
+  // Required. The list of returned JWT-SVIDs.
+  repeated JWTSVID svids = 1;
+}
+
+message JWTSVID {
+  // Required. The SPIFFE ID of the JWT-SVID.
+  string spiffe_id = 1;
+
+  // Required. Encoded JWT using JWS Compact Serialization.
+  string svid = 2;
+
+  // Optional. An operator-specified string used to provide guidance on how this
+  // identity should be used by a workload when more than one SVID is returned.
+  // For example, `internal` and `external` to indicate an SVID for internal or
+  // external use, respectively.
+  string hint = 3;
+}
+
+/////////////////////////////////////////////////////////////////////////
+// JWT Bundles
+/////////////////////////////////////////////////////////////////////////
+
+message FetchJWTBundlesRequest {
+  repeated MethodAttestation attestations = 1;
+
+  // Optional. The ID of the serverless cluster whose policy set should
+  // authorize this request (RFD-194). Empty selects the trust-domain-scoped
+  // policy set (backward-compatible).
+  string cluster_id = 2;
+}
+
+message FetchJWTBundlesResponse {
+  // Optional. Only set if all required attestations were satisfied.
+  JWTBundlesResult bundles = 1;
+}
+
+message JWTBundlesResult {
+  // Required. JWK encoded JWT bundles, keyed by the SPIFFE ID of the trust
+  // domain.
+  map<string, bytes> bundles = 1;
+}
