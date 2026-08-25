@@ -8,6 +8,7 @@ require (
 	github.com/aws/aws-sdk-go-v2 v1.43.8
 	github.com/aws/aws-sdk-go-v2/config v1.32.39
 	github.com/aws/aws-sdk-go-v2/service/sts v1.45.8
+	github.com/spiffe/go-spiffe/v2 v2.8.1
 	google.golang.org/grpc v1.83.0
 	google.golang.org/protobuf v1.36.11
 )
@@ -26,11 +27,11 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sso v1.33.8 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.38.8 // indirect
 	github.com/aws/smithy-go v1.27.10 // indirect
+	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
-	github.com/spiffe/go-spiffe/v2 v2.8.1 // indirect
 	golang.org/x/crypto v0.51.0 // indirect
 	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/sys v0.45.0 // indirect
