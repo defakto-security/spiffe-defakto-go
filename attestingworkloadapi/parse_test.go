@@ -36,13 +36,13 @@ func buildX509Fixture(t *testing.T, spiffeID string) (certDER, keyDER []byte) {
 		t.Fatalf("parse spiffe id: %v", err)
 	}
 	tmpl := &x509.Certificate{
-		SerialNumber:       big.NewInt(1),
-		Subject:            pkix.Name{CommonName: "test"},
-		NotBefore:          time.Now().Add(-time.Minute),
-		NotAfter:           time.Now().Add(time.Hour),
-		URIs:               []*url.URL{uri},
-		KeyUsage:           x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:        []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "test"},
+		NotBefore:             time.Now().Add(-time.Minute),
+		NotAfter:              time.Now().Add(time.Hour),
+		URIs:                  []*url.URL{uri},
+		KeyUsage:              x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,
 	}
 	certDER, err = x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
@@ -115,6 +115,35 @@ func TestCollectAttestations_OneFails(t *testing.T) {
 	}
 }
 
+func TestCollectAttestations_PreservesOrder(t *testing.T) {
+	// First attestor sleeps so second finishes first, proving order is preserved.
+	a1 := &fixedAttestor{
+		name:     "first",
+		version:  "1.0",
+		evidence: attestation.Evidence{Payload: []byte("first-evidence")},
+		delay:    10 * time.Millisecond,
+	}
+	a2 := &fixedAttestor{
+		name:     "second",
+		version:  "1.0",
+		evidence: attestation.Evidence{Payload: []byte("second-evidence")},
+	}
+
+	got, err := collectAttestations(context.Background(), []attestation.Attestor{a1, a2})
+	if err != nil {
+		t.Fatalf("collectAttestations() error = %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len(got) = %d, want 2", len(got))
+	}
+	if got[0].MethodType != "first" || string(got[0].Evidence) != "first-evidence" {
+		t.Errorf("got[0] = %+v, want first attestor at index 0", got[0])
+	}
+	if got[1].MethodType != "second" || string(got[1].Evidence) != "second-evidence" {
+		t.Errorf("got[1] = %+v, want second attestor at index 1", got[1])
+	}
+}
+
 func TestParseX509Response(t *testing.T) {
 	certDER, keyDER := buildX509Fixture(t, "spiffe://example.org/workload")
 	proto := &serverlessapi.X509SVID{
@@ -140,6 +169,54 @@ func TestParseX509Response(t *testing.T) {
 	}
 	if _, ok := bundles["example.org"]; !ok {
 		t.Errorf("bundles missing own trust domain example.org: %+v", bundles)
+	}
+}
+
+func TestParseX509Response_WithFederatedBundles(t *testing.T) {
+	// Own trust domain cert
+	certDER1, keyDER1 := buildX509Fixture(t, "spiffe://example.org/workload")
+	proto1 := &serverlessapi.X509SVID{
+		SpiffeId:    "spiffe://example.org/workload",
+		X509Svid:    certDER1,
+		X509SvidKey: keyDER1,
+		Bundle:      certDER1,
+		Hint:        "internal",
+	}
+
+	// Federated bundle certs for other trust domains
+	certDER2, _ := buildX509Fixture(t, "spiffe://other-domain.com/workload")
+	validFederated := map[string][]byte{
+		"other-domain.com": certDER2,
+		"malformed.com":    []byte("garbage-not-valid-cert-der"),
+		"not/a/domain":     certDER2, // invalid domain name format
+	}
+
+	svids, bundles, err := parseX509Response([]*serverlessapi.X509SVID{proto1}, validFederated)
+	if err != nil {
+		t.Fatalf("parseX509Response() error = %v", err)
+	}
+
+	// Verify own trust domain bundle is present
+	if _, ok := bundles["example.org"]; !ok {
+		t.Errorf("bundles missing own trust domain example.org: %+v", bundles)
+	}
+
+	// Verify valid federated bundle is present
+	if _, ok := bundles["other-domain.com"]; !ok {
+		t.Errorf("bundles missing valid federated other-domain.com: %+v", bundles)
+	}
+
+	// Verify malformed entries are silently skipped (malformed.com with garbage DER, not/a/domain with invalid format)
+	if bundle, ok := bundles["malformed.com"]; ok {
+		t.Errorf("bundles should skip malformed entry malformed.com, but got: %+v", bundle)
+	}
+	if bundle, ok := bundles["not/a/domain"]; ok {
+		t.Errorf("bundles should skip entry with invalid domain format not/a/domain, but got: %+v", bundle)
+	}
+
+	// Verify SVIDs are still present (error in federated shouldn't affect SVID parsing)
+	if len(svids) != 1 {
+		t.Errorf("len(svids) = %d, want 1", len(svids))
 	}
 }
 
@@ -169,10 +246,14 @@ type fixedAttestor struct {
 	name, version string
 	evidence      attestation.Evidence
 	err           error
+	delay         time.Duration
 }
 
 func (f *fixedAttestor) PluginName() string    { return f.name }
 func (f *fixedAttestor) PluginVersion() string { return f.version }
-func (f *fixedAttestor) CollectEvidence(context.Context) (attestation.Evidence, error) {
+func (f *fixedAttestor) CollectEvidence(ctx context.Context) (attestation.Evidence, error) {
+	if f.delay > 0 {
+		time.Sleep(f.delay)
+	}
 	return f.evidence, f.err
 }
