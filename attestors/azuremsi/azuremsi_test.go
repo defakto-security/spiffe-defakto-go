@@ -81,3 +81,33 @@ func TestAttestor_PluginNameAndVersion(t *testing.T) {
 		t.Errorf("PluginName/PluginVersion = %q/%q", a.PluginName(), a.PluginVersion())
 	}
 }
+
+func TestNew_WithClientID(t *testing.T) {
+	a, err := New(&Options{ClientID: "some-client-id"})
+	if err != nil {
+		t.Fatalf("New(ClientID) error = %v", err)
+	}
+	if a == nil {
+		t.Error("New(ClientID) returned nil Attestor")
+	}
+}
+
+func TestNew_WithPrincipalID(t *testing.T) {
+	a, err := New(&Options{PrincipalID: "some-principal-id"})
+	if err != nil {
+		t.Fatalf("New(PrincipalID) error = %v", err)
+	}
+	if a == nil {
+		t.Error("New(PrincipalID) returned nil Attestor")
+	}
+}
+
+func TestNew_WithResourceID(t *testing.T) {
+	a, err := New(&Options{ResourceID: "/subscriptions/sub-id/resourceGroups/rg/providers/Microsoft.ManagedIdentity/userAssignedIdentities/identity-name"})
+	if err != nil {
+		t.Fatalf("New(ResourceID) error = %v", err)
+	}
+	if a == nil {
+		t.Error("New(ResourceID) returned nil Attestor")
+	}
+}
