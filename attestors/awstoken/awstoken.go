@@ -42,6 +42,9 @@ type Options struct {
 	DurationSeconds int32
 	// Tags are attached to the token as STS session tags.
 	Tags map[string]string
+	// Client is a test-only override for the STS client. If provided, New() will use it
+	// instead of loading from ambient AWS configuration. Unexported in tests.
+	Client tokenGetter
 }
 
 // Attestor attests via AWS STS GetWebIdentityToken. It satisfies
@@ -56,7 +59,8 @@ type Attestor struct {
 
 // New builds an Attestor, loading an STS client from the ambient AWS
 // configuration (environment variables, IRSA, EC2/ECS instance metadata).
-// Pass nil for default options.
+// Pass nil for default options. If opts.Client is non-nil, it is used instead
+// of loading from the ambient AWS configuration (test-only override).
 func New(ctx context.Context, opts *Options) (*Attestor, error) {
 	if opts == nil {
 		opts = &Options{}
@@ -77,11 +81,15 @@ func New(ctx context.Context, opts *Options) (*Attestor, error) {
 		a.duration = defaultDurationSeconds
 	}
 
-	cfg, err := config.LoadDefaultConfig(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("awstoken: load AWS config: %w", err)
+	if opts.Client != nil {
+		a.client = opts.Client
+	} else {
+		cfg, err := config.LoadDefaultConfig(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("awstoken: load AWS config: %w", err)
+		}
+		a.client = sts.NewFromConfig(cfg)
 	}
-	a.client = sts.NewFromConfig(cfg)
 	return a, nil
 }
 
