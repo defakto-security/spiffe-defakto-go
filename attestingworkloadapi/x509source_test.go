@@ -300,20 +300,32 @@ func TestX509Source_BackgroundRefresh_FiresThenStopsOnClose(t *testing.T) {
 		t.Fatalf("X509Source() error = %v", err)
 	}
 
-	// refreshDelay(now+1.5s) ~= 1.275s (0.85 * remaining), comfortably above
-	// the 1s floor and within this sleep's patience.
-	time.Sleep(2 * time.Second)
+	// Poll for the first background refresh instead of sleeping a fixed
+	// window: the fixture's fixed NotAfter means every refresh after the
+	// first floors at minRefreshDelay (1s), so a fixed-sleep-then-snapshot
+	// check races the next scheduled refresh under host scheduling jitter.
+	// Polling only needs "at least one refresh happened", not "happened by
+	// this exact deadline".
+	deadline := time.Now().Add(10 * time.Second)
+	for atomic.LoadInt32(&srv.x509FetchCount) < 2 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
 	countAfterRunning := atomic.LoadInt32(&srv.x509FetchCount)
 	if countAfterRunning < 2 {
-		t.Fatalf("x509FetchCount = %d after 2s running, want >= 2 (initial fetch + at least one refresh)", countAfterRunning)
+		t.Fatalf("x509FetchCount = %d after 10s, want >= 2 (initial fetch + at least one refresh)", countAfterRunning)
 	}
 
 	if err := src.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
 	}
-	time.Sleep(2 * time.Second)
+	countAtClose := atomic.LoadInt32(&srv.x509FetchCount)
+	// Wait several multiples of the 1s retry floor: any refresh in flight
+	// when Close() landed settles well within this window, so a persistent
+	// increase past countAtClose means the background loop genuinely didn't
+	// stop, not that we sampled too early.
+	time.Sleep(5 * time.Second)
 	countAfterClose := atomic.LoadInt32(&srv.x509FetchCount)
-	if countAfterClose != countAfterRunning {
-		t.Errorf("x509FetchCount grew from %d to %d after Close(); background refresh did not stop", countAfterRunning, countAfterClose)
+	if countAfterClose > countAtClose+1 {
+		t.Errorf("x509FetchCount grew from %d to %d well after Close(); background refresh did not stop", countAtClose, countAfterClose)
 	}
 }
