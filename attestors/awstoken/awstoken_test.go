@@ -94,7 +94,7 @@ func strPtr(s string) *string { return &s }
 
 func TestNew_WithFakeClient(t *testing.T) {
 	fake := &fakeTokenGetter{output: &sts.GetWebIdentityTokenOutput{WebIdentityToken: strPtr("new-token")}}
-	opts := &Options{Client: fake}
+	opts := &Options{client: fake}
 
 	a, err := New(context.Background(), opts)
 	if err != nil {
@@ -129,7 +129,7 @@ func TestNew_WithCustomOptions(t *testing.T) {
 		SigningAlgorithm: "ES384",
 		DurationSeconds:  300,
 		Tags:             map[string]string{"env": "test"},
-		Client:           fake,
+		client:           fake,
 	}
 
 	a, err := New(context.Background(), opts)
