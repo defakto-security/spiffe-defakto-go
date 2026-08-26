@@ -3,6 +3,7 @@ package attestingworkloadapi
 import (
 	"context"
 	"net"
+	"sync/atomic"
 	"testing"
 
 	"google.golang.org/grpc"
@@ -54,9 +55,15 @@ type fakeServer struct {
 
 	jwtBundlesResp *serverlessapi.FetchJWTBundlesResponse
 	jwtBundlesErr  error
+
+	// x509FetchCount counts FetchX509SVID calls. It's atomic (unlike the
+	// fields above) because tests that exercise the background refresh loop
+	// read it concurrently with the server goroutine still calling in.
+	x509FetchCount int32
 }
 
 func (f *fakeServer) FetchX509SVID(_ context.Context, req *serverlessapi.FetchX509SVIDRequest) (*serverlessapi.FetchX509SVIDResponse, error) {
+	atomic.AddInt32(&f.x509FetchCount, 1)
 	f.lastX509 = req
 	if f.x509Err != nil {
 		return nil, f.x509Err

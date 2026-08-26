@@ -16,6 +16,11 @@ import (
 const (
 	minRefreshDelay = time.Second
 	refreshRatio    = 0.85
+
+	// refreshFetchTimeout bounds a single background refresh attempt so a
+	// hung attestation-server or attestor call can't block refreshLoop (and
+	// thus delay Close) indefinitely.
+	refreshFetchTimeout = 30 * time.Second
 )
 
 // X509Source is a source of X509-SVIDs and X.509 bundles maintained by
@@ -31,6 +36,14 @@ type X509Source struct {
 
 	closeOnce sync.Once
 	closeCh   chan struct{}
+
+	// refreshCtx/refreshCancel bound background refresh attempts and let
+	// Close interrupt one that's in flight, rather than only stopping the
+	// loop between attempts. Deliberately rooted in context.Background(),
+	// not the ctx passed to X509Source — that ctx only bounds the initial
+	// blocking fetch, not the source's whole lifetime.
+	refreshCtx    context.Context
+	refreshCancel context.CancelFunc
 }
 
 var (
@@ -46,11 +59,14 @@ func (c *Client) X509Source(ctx context.Context) (*X509Source, error) {
 	if err != nil {
 		return nil, err
 	}
+	refreshCtx, refreshCancel := context.WithCancel(context.Background())
 	src := &X509Source{
-		client:  c,
-		svid:    svid,
-		bundles: bundles,
-		closeCh: make(chan struct{}),
+		client:        c,
+		svid:          svid,
+		bundles:       bundles,
+		closeCh:       make(chan struct{}),
+		refreshCtx:    refreshCtx,
+		refreshCancel: refreshCancel,
 	}
 	go src.refreshLoop()
 	return src, nil
@@ -75,9 +91,13 @@ func (s *X509Source) GetX509BundleForTrustDomain(trustDomain spiffeid.TrustDomai
 	return bundle, nil
 }
 
-// Close stops the background refresh loop. Safe to call more than once.
+// Close stops the background refresh loop, cancelling any refresh attempt
+// currently in flight. Safe to call more than once.
 func (s *X509Source) Close() error {
-	s.closeOnce.Do(func() { close(s.closeCh) })
+	s.closeOnce.Do(func() {
+		close(s.closeCh)
+		s.refreshCancel()
+	})
 	return nil
 }
 
@@ -90,7 +110,7 @@ func (s *X509Source) refreshLoop() {
 		case <-time.After(delay):
 		}
 
-		svid, bundles, err := s.client.fetchX509(context.Background())
+		svid, bundles, err := s.fetchRefresh()
 		if err != nil {
 			// Best-effort retry, floored so a persistent failure doesn't spin.
 			select {
@@ -106,6 +126,15 @@ func (s *X509Source) refreshLoop() {
 		s.bundles = bundles
 		s.mu.Unlock()
 	}
+}
+
+// fetchRefresh runs one background refresh attempt bounded by
+// refreshFetchTimeout, and cancellable early via s.refreshCtx (closed by
+// Close) so a hung server/attestor call can't block refreshLoop forever.
+func (s *X509Source) fetchRefresh() (*x509svid.SVID, map[string]*x509bundle.Bundle, error) {
+	ctx, cancel := context.WithTimeout(s.refreshCtx, refreshFetchTimeout)
+	defer cancel()
+	return s.client.fetchX509(ctx)
 }
 
 func (s *X509Source) currentExpiry() time.Time {
