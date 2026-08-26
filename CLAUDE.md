@@ -58,8 +58,9 @@ adopting it elsewhere is a separate task in that consumer's own repo.
 - `attestingworkloadapi/` — the serverless attestation gRPC client:
   `Client`, `X509Source` (satisfies `x509svid.Source` + `x509bundle.Source`,
   background-refreshes like `workloadapi.X509Source` does), `JWTSource`
-  (satisfies `jwtbundle.Source`, always re-attests per call — same as
-  `workloadapi.JWTSource.FetchJWTSVID`).
+  (satisfies `jwtsvid.Source` + `jwtbundle.Source`; `FetchJWTSVID`
+  re-attests per call — same as `workloadapi.JWTSource.FetchJWTSVID` — while
+  `GetJWTBundleForTrustDomain` caches the bundle map for 60s).
   - `attestingworkloadapi/internal/serverlessapi/` — generated gRPC stubs,
     regenerate with `mise run gen-protos` after updating
     `protos/alpha/serverlessapi/api.proto`.

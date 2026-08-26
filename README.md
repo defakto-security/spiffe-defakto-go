@@ -63,8 +63,11 @@ func main() {
 `x509svid.Source` and `x509bundle.Source` interfaces, so it's usable
 anywhere a consumer is typed against those — e.g. in place of
 `workloadapi.X509Source` — with no adapter code. `client.JWTSource()`
-similarly returns a `*JWTSource` satisfying `jwtbundle.Source`, plus its own
-`FetchJWTSVID` method; every JWT call re-attests live, there is no cache.
+similarly returns a `*JWTSource` satisfying `jwtsvid.Source` and
+`jwtbundle.Source`. Every `FetchJWTSVID` call re-attests live (the audience
+varies per call, so there is nothing to cache); `GetJWTBundleForTrustDomain`
+caches the bundle map for 60 seconds, since `jwtsvid.ParseAndValidate` calls
+it once per token validation.
 
 ## Attestors
 

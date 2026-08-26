@@ -60,6 +60,10 @@ type fakeServer struct {
 	// fields above) because tests that exercise the background refresh loop
 	// read it concurrently with the server goroutine still calling in.
 	x509FetchCount int32
+
+	// jwtBundlesFetchCount counts FetchJWTBundles calls, for tests asserting
+	// the JWTSource bundle cache actually suppresses RPCs.
+	jwtBundlesFetchCount int32
 }
 
 func (f *fakeServer) FetchX509SVID(_ context.Context, req *serverlessapi.FetchX509SVIDRequest) (*serverlessapi.FetchX509SVIDResponse, error) {
@@ -80,6 +84,7 @@ func (f *fakeServer) FetchJWTSVID(_ context.Context, req *serverlessapi.FetchJWT
 }
 
 func (f *fakeServer) FetchJWTBundles(_ context.Context, _ *serverlessapi.FetchJWTBundlesRequest) (*serverlessapi.FetchJWTBundlesResponse, error) {
+	atomic.AddInt32(&f.jwtBundlesFetchCount, 1)
 	if f.jwtBundlesErr != nil {
 		return nil, f.jwtBundlesErr
 	}
