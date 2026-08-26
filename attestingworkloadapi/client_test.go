@@ -63,6 +63,7 @@ func TestResolveTarget_ExplicitServerAddress(t *testing.T) {
 }
 
 func TestResolveTarget_TrustDomainID(t *testing.T) {
+	t.Setenv(envServerAddress, "")
 	cfg := &config{trustDomainID: "td-m36ckrte4e"}
 	target, err := resolveTarget(cfg)
 	if err != nil {
@@ -74,6 +75,7 @@ func TestResolveTarget_TrustDomainID(t *testing.T) {
 }
 
 func TestResolveTarget_InvalidTrustDomainID(t *testing.T) {
+	t.Setenv(envServerAddress, "")
 	cfg := &config{trustDomainID: "Not_Valid!"}
 	if _, err := resolveTarget(cfg); !errors.Is(err, ErrInvalidTrustDomain) {
 		t.Errorf("err = %v, want ErrInvalidTrustDomain", err)
@@ -81,9 +83,87 @@ func TestResolveTarget_InvalidTrustDomainID(t *testing.T) {
 }
 
 func TestResolveTarget_NothingConfigured(t *testing.T) {
+	// Cleared explicitly: resolveTarget falls back to these, so an ambient
+	// value in the developer's or CI's environment would break the test.
+	t.Setenv(envServerAddress, "")
+	t.Setenv(envTrustDomainID, "")
+
 	cfg := &config{}
 	if _, err := resolveTarget(cfg); !errors.Is(err, ErrServerAddressNotConfigured) {
 		t.Errorf("err = %v, want ErrServerAddressNotConfigured", err)
+	}
+}
+
+func TestResolveTarget_ServerAddressFromEnv(t *testing.T) {
+	t.Setenv(envServerAddress, "env-server.internal:9443")
+	t.Setenv(envTrustDomainID, "")
+
+	target, err := resolveTarget(&config{})
+	if err != nil {
+		t.Fatalf("resolveTarget() error = %v", err)
+	}
+	if target != "env-server.internal:9443" {
+		t.Errorf("target = %q, want %q", target, "env-server.internal:9443")
+	}
+}
+
+func TestResolveTarget_TrustDomainIDFromEnv(t *testing.T) {
+	t.Setenv(envServerAddress, "")
+	t.Setenv(envTrustDomainID, "td-m36ckrte4e")
+
+	target, err := resolveTarget(&config{})
+	if err != nil {
+		t.Fatalf("resolveTarget() error = %v", err)
+	}
+	if target != "td-m36ckrte4e.agent.spirl.com:443" {
+		t.Errorf("target = %q, want %q", target, "td-m36ckrte4e.agent.spirl.com:443")
+	}
+}
+
+func TestResolveTarget_ExplicitServerAddressBeatsEnv(t *testing.T) {
+	t.Setenv(envServerAddress, "env-server.internal:9443")
+
+	target, err := resolveTarget(&config{serverAddress: "explicit.internal:8443"})
+	if err != nil {
+		t.Fatalf("resolveTarget() error = %v", err)
+	}
+	if target != "explicit.internal:8443" {
+		t.Errorf("target = %q, want the explicit address to win over the env var", target)
+	}
+}
+
+func TestNew_ClusterIDFromEnv(t *testing.T) {
+	t.Setenv(envClusterID, "cluster-from-env")
+
+	c, err := New(context.Background(),
+		WithAttestors(noopAttestor{}),
+		WithTarget("passthrough:///bufnet"),
+		WithDialOptions(grpc.WithTransportCredentials(insecure.NewCredentials())),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer func() { _ = c.Close() }()
+	if c.clusterID != "cluster-from-env" {
+		t.Errorf("clusterID = %q, want %q", c.clusterID, "cluster-from-env")
+	}
+}
+
+func TestNew_ExplicitClusterIDBeatsEnv(t *testing.T) {
+	t.Setenv(envClusterID, "cluster-from-env")
+
+	c, err := New(context.Background(),
+		WithAttestors(noopAttestor{}),
+		WithClusterID("explicit-cluster"),
+		WithTarget("passthrough:///bufnet"),
+		WithDialOptions(grpc.WithTransportCredentials(insecure.NewCredentials())),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer func() { _ = c.Close() }()
+	if c.clusterID != "explicit-cluster" {
+		t.Errorf("clusterID = %q, want %q", c.clusterID, "explicit-cluster")
 	}
 }
 
