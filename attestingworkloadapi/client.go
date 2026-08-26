@@ -117,7 +117,7 @@ func New(ctx context.Context, opts ...Option) (*Client, error) {
 
 	conn, err := grpc.NewClient(target, dialOptions...)
 	if err != nil {
-		return nil, fmt.Errorf("attestingworkloadapi: dial %s: %w", target, err)
+		return nil, newError(CodeDialFailed, fmt.Sprintf("attestingworkloadapi: dial %s", target), err)
 	}
 
 	clusterID := strings.TrimSpace(cfg.clusterID)

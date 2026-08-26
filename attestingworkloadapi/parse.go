@@ -2,7 +2,6 @@ package attestingworkloadapi
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/spiffe/go-spiffe/v2/bundle/jwtbundle"
 	"github.com/spiffe/go-spiffe/v2/bundle/x509bundle"
@@ -64,7 +63,7 @@ func parseX509Response(svids []*serverlessapi.X509SVID, federated map[string][]b
 	for _, s := range svids {
 		svid, err := x509svid.ParseRaw(s.GetX509Svid(), s.GetX509SvidKey())
 		if err != nil {
-			return nil, nil, fmt.Errorf("attestingworkloadapi: parse x509-svid: %w", err)
+			return nil, nil, newError(CodeAttestationFailed, "attestingworkloadapi: parse x509-svid", err)
 		}
 		svid.Hint = s.GetHint()
 		parsed = append(parsed, svid)
@@ -110,7 +109,7 @@ func parseX509BundlesMap(bundlesMap map[string][]byte) map[string]*x509bundle.Bu
 func parseJWTSVIDFromProto(proto *serverlessapi.JWTSVID, audiences []string) (*jwtsvid.SVID, error) {
 	svid, err := jwtsvid.ParseInsecure(proto.GetSvid(), audiences)
 	if err != nil {
-		return nil, fmt.Errorf("attestingworkloadapi: parse jwt-svid: %w", err)
+		return nil, newError(CodeAttestationFailed, "attestingworkloadapi: parse jwt-svid", err)
 	}
 	svid.Hint = proto.GetHint()
 	return svid, nil

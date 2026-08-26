@@ -13,6 +13,7 @@ const (
 	CodeAttestorCollectionFailed   Code = "ATTESTOR_COLLECTION_FAILED"
 	CodeAttestationFailed          Code = "ATTESTATION_FAILED"
 	CodeBundleNotFound             Code = "BUNDLE_NOT_FOUND"
+	CodeDialFailed                 Code = "DIAL_FAILED"
 )
 
 // Error is the error type returned by this package's public API.
@@ -52,4 +53,5 @@ var (
 	ErrAttestorCollectionFailed   = &Error{Code: CodeAttestorCollectionFailed, Message: "one or more attestors failed to collect evidence"}
 	ErrAttestationFailed          = &Error{Code: CodeAttestationFailed, Message: "attestation failed"}
 	ErrBundleNotFound             = &Error{Code: CodeBundleNotFound, Message: "bundle not found"}
+	ErrDialFailed                 = &Error{Code: CodeDialFailed, Message: "failed to dial the attestation server"}
 )
