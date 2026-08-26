@@ -62,20 +62,47 @@ func main() {
 `*attestingworkloadapi.X509Source` satisfies `go-spiffe/v2`'s
 `x509svid.Source` and `x509bundle.Source` interfaces, so it's usable
 anywhere a consumer is typed against those — e.g. in place of
-`workloadapi.X509Source` — with no adapter code. `client.JWTSource()`
-similarly returns a `*JWTSource` satisfying `jwtsvid.Source` and
-`jwtbundle.Source`. Every `FetchJWTSVID` call re-attests live (the audience
-varies per call, so there is nothing to cache); `GetJWTBundleForTrustDomain`
-caches the bundle map for 60 seconds, since `jwtsvid.ParseAndValidate` calls
-it once per token validation.
+`workloadapi.X509Source` — with no adapter code. Call `client.X509Source(ctx)`
+once and hold onto the result; it refreshes itself in the background and
+must be `Close()`d when you're done with it (independently of `client.Close()`
+— closing the `Client` does not stop a source's background refresh loop, it
+just makes its next refresh attempt fail against a dead connection, which the
+source's own retry/backoff will keep retrying until you call `src.Close()`).
+If a background refresh is failing, `GetX509SVID()` keeps returning the last
+SVID it has — which may be past its expiry — with a `nil` error; call
+`LastRefreshError()` to check whether the source is actually still healthy.
+`GetX509BundleForTrustDomain` only returns bundles present in the most recent
+`FetchX509SVID` response (your own trust domain plus any federated bundles
+the server included there) — it does not make a separate live call, so a
+federated trust domain the server doesn't include in that response returns
+`ErrBundleNotFound` regardless of whether that bundle exists server-side.
+
+`client.JWTSource()` returns a `*JWTSource` satisfying `jwtsvid.Source` and
+`jwtbundle.Source`. **Call it once and hold the result** — each call to
+`client.JWTSource()` constructs a new `*JWTSource` with its own, empty bundle
+cache, so calling it per-request (e.g. inside an HTTP handler) defeats the
+caching described below and re-attests on every single call. Every
+`FetchJWTSVID` call re-attests live (the audience varies per call, so there
+is nothing to cache); `GetJWTBundleForTrustDomain` caches the bundle map for
+60 seconds *on that `*JWTSource` instance*, since `jwtsvid.ParseAndValidate`
+calls it once per token validation and an uncached live call there would let
+a flood of inbound tokens trigger a matching flood of attestation calls.
 
 ## Attestors
 
-| Package                | `PluginName()` | `PluginVersion()` | Cloud | Defaults |
-|------------------------|----------------|--------------------|-------|----------|
-| `attestors/awstoken`   | `aws_token`    | `1.0`              | AWS (STS `GetWebIdentityToken`) | audience `urn:defakto:security:server`, algorithm `RS256`, duration `60s` |
-| `attestors/gcpiit`     | `gcp_iit`      | `1.0`              | GCP (Instance Identity Token, metadata service) | host `metadata.google.internal`, service account `default`, audience `urn:defakto:security:server` |
-| `attestors/azuremsi`   | `azure_msi`    | `1.0`              | Azure (Managed Identity) | audience `api://AzureADTokenExchange`, system-assigned identity |
+| Package                | Constructor | `PluginName()` | `PluginVersion()` | Cloud | Defaults |
+|------------------------|-------------|----------------|--------------------|-------|----------|
+| `attestors/awstoken`   | `New(ctx context.Context, opts *Options) (*Attestor, error)` | `aws_token`    | `1.0`              | AWS (STS `GetWebIdentityToken`) | audience `urn:defakto:security:server`, algorithm `RS256`, duration `60s` |
+| `attestors/gcpiit`     | `New(opts *Options) *Attestor` (no `ctx`, no error) | `gcp_iit`      | `1.0`              | GCP (Instance Identity Token, metadata service) | host `metadata.google.internal`, service account `default`, audience `urn:defakto:security:server` |
+| `attestors/azuremsi`   | `New(opts *Options) (*Attestor, error)` (no `ctx`) | `azure_msi`    | `1.0`              | Azure (Managed Identity) | audience `api://AzureADTokenExchange`, system-assigned identity |
+
+The three constructors are intentionally not uniform: `awstoken.New` takes a
+`ctx` because it calls `config.LoadDefaultConfig` (which can make network
+calls to resolve credentials); `gcpiit.New` never fails, since it just builds
+an HTTP request template; `azuremsi.New` can fail (multiple identity
+selectors set) but doesn't need a `ctx`, since `azidentity.NewManagedIdentityCredential`
+doesn't call out to IMDS until a token is actually requested. Pass `nil` for
+`opts` on any of them to accept all documented defaults.
 
 For the `custom_jwt` or `extension` serverless attestation methods, there is
 no built-in attestor in any Defakto SDK — implement the `attestation.Attestor`
@@ -115,6 +142,29 @@ attestors from a `DEFAKTO_ATTESTORS` env var by name: Go's static import
 model would force every consumer's binary to compile in the AWS, Azure, and
 GCP dependency graphs regardless of which cloud it actually targets, so
 attestors are always wired explicitly by the caller.
+
+## Errors
+
+`attestingworkloadapi` returns errors as `*attestingworkloadapi.Error`
+(`Code`, `Message`, and a wrapped `Cause`), matched by `Code` rather than by
+message text or pointer identity — so `errors.Is(err, SentinelErr)` works
+regardless of the specific message or wrapped cause:
+
+```go
+client, err := attestingworkloadapi.New(ctx, attestingworkloadapi.WithAttestors(attestor))
+if errors.Is(err, attestingworkloadapi.ErrServerAddressNotConfigured) {
+	// neither WithServerAddress/DEFAKTO_SERVER_ADDRESS nor
+	// WithTrustDomainID/DEFAKTO_TRUST_DOMAIN_ID nor WithTarget was set
+}
+```
+
+The sentinels: `ErrServerAddressNotConfigured`, `ErrInvalidServerAddress`,
+`ErrInvalidTrustDomain`, `ErrNoAttestorsConfigured` (also returned for a nil
+attestor passed to `WithAttestors`), `ErrAttestorCollectionFailed`,
+`ErrAttestationFailed`, `ErrBundleNotFound`, `ErrDialFailed`. `errors.Is`
+also unwraps to the underlying cause (e.g. the gRPC status or attestor
+error), so `errors.As` against a more specific error type still works
+through an `attestingworkloadapi.Error`.
 
 ## Development
 
