@@ -10,6 +10,8 @@ import (
 	"errors"
 	"math/big"
 	"net/url"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -171,6 +173,116 @@ func TestRefreshDelay(t *testing.T) {
 				t.Errorf("refreshDelay(now+%v) = %v, want between %v and %v", tt.expiresIn, got, tt.wantAtLeat, tt.wantAtMost)
 			}
 		})
+	}
+}
+
+func TestFailureBackoff(t *testing.T) {
+	tests := []struct {
+		failures int
+		want     time.Duration
+	}{
+		{failures: 1, want: minRefreshDelay},
+		{failures: 2, want: 2 * minRefreshDelay},
+		{failures: 3, want: 4 * minRefreshDelay},
+		{failures: 4, want: 8 * minRefreshDelay},
+		{failures: 20, want: maxRefreshBackoff},
+		{failures: 1000, want: maxRefreshBackoff},
+	}
+	for _, tt := range tests {
+		if got := failureBackoff(tt.failures); got != tt.want {
+			t.Errorf("failureBackoff(%d) = %v, want %v", tt.failures, got, tt.want)
+		}
+	}
+}
+
+// flakyX509Server fails FetchX509SVID for calls 2..failThrough (the first
+// call, X509Source's blocking initial fetch, always succeeds) and records
+// when each call arrived, so a test can watch the retry cadence grow.
+type flakyX509Server struct {
+	serverlessapi.UnimplementedSpiffeWorkloadAPIServer
+
+	resp        *serverlessapi.FetchX509SVIDResponse
+	failThrough int
+
+	mu    sync.Mutex
+	calls []time.Time
+}
+
+func (f *flakyX509Server) FetchX509SVID(_ context.Context, _ *serverlessapi.FetchX509SVIDRequest) (*serverlessapi.FetchX509SVIDResponse, error) {
+	f.mu.Lock()
+	f.calls = append(f.calls, time.Now())
+	n := len(f.calls)
+	f.mu.Unlock()
+
+	if n > 1 && n <= f.failThrough {
+		return nil, errors.New("attestation denied")
+	}
+	return f.resp, nil
+}
+
+func (f *flakyX509Server) callTimes() []time.Time {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]time.Time(nil), f.calls...)
+}
+
+func TestX509Source_RefreshFailures_BackOffAndSurfaceLastError(t *testing.T) {
+	// Expiry is deliberately short so the first refresh fires at ~1.02s
+	// (0.85 * 1.2s); after that the SVID is expired, refreshDelay floors at
+	// minRefreshDelay, and only failureBackoff separates the attempts.
+	certDER, keyDER := buildX509FixtureWithExpiry(t, "spiffe://example.org/workload", time.Now().Add(1200*time.Millisecond))
+	srv := &flakyX509Server{
+		failThrough: 3, // calls 2 and 3 fail, call 4 succeeds
+		resp: &serverlessapi.FetchX509SVIDResponse{
+			X509Svids: &serverlessapi.X509SVIDResult{
+				Svids: []*serverlessapi.X509SVID{{SpiffeId: "spiffe://example.org/workload", X509Svid: certDER, X509SvidKey: keyDER}},
+			},
+		},
+	}
+	client := newTestClient(t, srv)
+
+	src, err := client.X509Source(context.Background())
+	if err != nil {
+		t.Fatalf("X509Source() error = %v", err)
+	}
+	defer func() { _ = src.Close() }()
+
+	if err := src.LastRefreshError(); err != nil {
+		t.Errorf("LastRefreshError() = %v before any refresh, want nil", err)
+	}
+
+	// Both failures have landed by now (~1.0s and ~3.0s) but the successful
+	// retry (~6.0s) has not.
+	time.Sleep(4 * time.Second)
+	refreshErr := src.LastRefreshError()
+	if refreshErr == nil {
+		t.Fatal("LastRefreshError() = nil while refresh is failing, want the server's error")
+	}
+	if !errors.Is(refreshErr, ErrAttestationFailed) {
+		t.Errorf("LastRefreshError() = %v, want an ErrAttestationFailed", refreshErr)
+	}
+	if !strings.Contains(refreshErr.Error(), "attestation denied") {
+		t.Errorf("LastRefreshError() = %v, want it to carry the server's %q", refreshErr, "attestation denied")
+	}
+	// A 1s-floor hot loop would have burned through far more than this.
+	if got := len(srv.callTimes()); got > 4 {
+		t.Errorf("FetchX509SVID calls = %d in 4s, want <= 4 (backoff is not spacing retries out)", got)
+	}
+
+	// Wait out the 2s backoff after the second failure plus the 1s floor.
+	time.Sleep(4 * time.Second)
+	if err := src.LastRefreshError(); err != nil {
+		t.Errorf("LastRefreshError() = %v after a successful refresh, want nil", err)
+	}
+
+	calls := srv.callTimes()
+	if len(calls) < 4 {
+		t.Fatalf("FetchX509SVID calls = %d, want >= 4 (initial + 2 failures + 1 success)", len(calls))
+	}
+	firstGap := calls[2].Sub(calls[1])  // after 1 failure: 1s backoff + 1s floor
+	secondGap := calls[3].Sub(calls[2]) // after 2 failures: 2s backoff + 1s floor
+	if secondGap <= firstGap {
+		t.Errorf("retry gaps = %v then %v, want the second to be longer (exponential backoff)", firstGap, secondGap)
 	}
 }
 

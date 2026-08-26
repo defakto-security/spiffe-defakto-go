@@ -17,6 +17,12 @@ const (
 	minRefreshDelay = time.Second
 	refreshRatio    = 0.85
 
+	// maxRefreshBackoff caps the exponential backoff applied after
+	// consecutive refresh failures, so a persistently unreachable attestation
+	// server doesn't mean an evidence-collection round (a live STS/IMDS call
+	// per attestor) every couple of seconds forever.
+	maxRefreshBackoff = time.Minute
+
 	// refreshFetchTimeout bounds a single background refresh attempt so a
 	// hung attestation-server or attestor call can't block refreshLoop (and
 	// thus delay Close) indefinitely.
@@ -30,9 +36,10 @@ const (
 type X509Source struct {
 	client *Client
 
-	mu      sync.RWMutex
-	svid    *x509svid.SVID
-	bundles map[string]*x509bundle.Bundle
+	mu             sync.RWMutex
+	svid           *x509svid.SVID
+	bundles        map[string]*x509bundle.Bundle
+	lastRefreshErr error
 
 	closeOnce sync.Once
 	closeCh   chan struct{}
@@ -53,7 +60,9 @@ var (
 
 // X509Source performs an initial attestation (blocking, like
 // workloadapi.NewX509Source) and then refreshes in the background at 85% of
-// the current SVID's remaining lifetime, floored at 1 second.
+// the current SVID's remaining lifetime, floored at 1 second. Consecutive
+// refresh failures back off exponentially up to maxRefreshBackoff and are
+// reported by LastRefreshError.
 func (c *Client) X509Source(ctx context.Context) (*X509Source, error) {
 	svid, bundles, err := c.fetchX509(ctx)
 	if err != nil {
@@ -72,11 +81,23 @@ func (c *Client) X509Source(ctx context.Context) (*X509Source, error) {
 	return src, nil
 }
 
-// GetX509SVID returns the most recently fetched X509-SVID.
+// GetX509SVID returns the most recently fetched X509-SVID. It never fails
+// over to an error: if background refresh has been failing, this keeps
+// returning the last SVID obtained, which may be past its NotAfter — call
+// LastRefreshError to tell a healthy SVID from a stale one.
 func (s *X509Source) GetX509SVID() (*x509svid.SVID, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.svid, nil
+}
+
+// LastRefreshError returns the error from the most recent background refresh
+// attempt, or nil if it succeeded (or none has run yet). Non-nil means the
+// SVID from GetX509SVID is not being renewed and may be expired.
+func (s *X509Source) LastRefreshError() error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.lastRefreshErr
 }
 
 // GetX509BundleForTrustDomain returns the bundle for trustDomain from the
@@ -102,30 +123,55 @@ func (s *X509Source) Close() error {
 }
 
 func (s *X509Source) refreshLoop() {
+	failures := 0
 	for {
-		delay := refreshDelay(s.currentExpiry())
 		select {
 		case <-s.closeCh:
 			return
-		case <-time.After(delay):
+		case <-time.After(refreshDelay(s.currentExpiry())):
 		}
 
 		svid, bundles, err := s.fetchRefresh()
 		if err != nil {
-			// Best-effort retry, floored so a persistent failure doesn't spin.
+			select {
+			case <-s.closeCh:
+				// Close cancelled this attempt; that's not a refresh failure
+				// worth reporting from LastRefreshError.
+				return
+			default:
+			}
+			failures++
+			s.mu.Lock()
+			s.lastRefreshErr = err
+			s.mu.Unlock()
+			// Past NotAfter refreshDelay floors at minRefreshDelay, so without
+			// a growing backoff here a down server would be re-attested
+			// against every couple of seconds indefinitely.
 			select {
 			case <-s.closeCh:
 				return
-			case <-time.After(minRefreshDelay):
+			case <-time.After(failureBackoff(failures)):
 			}
 			continue
 		}
 
+		failures = 0
 		s.mu.Lock()
 		s.svid = svid
 		s.bundles = bundles
+		s.lastRefreshErr = nil
 		s.mu.Unlock()
 	}
+}
+
+// failureBackoff doubles minRefreshDelay per consecutive failure, capped at
+// maxRefreshBackoff.
+func failureBackoff(failures int) time.Duration {
+	backoff := minRefreshDelay
+	for i := 1; i < failures && backoff < maxRefreshBackoff; i++ {
+		backoff *= 2
+	}
+	return min(backoff, maxRefreshBackoff)
 }
 
 // fetchRefresh runs one background refresh attempt bounded by
