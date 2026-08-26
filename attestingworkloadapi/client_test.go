@@ -19,6 +19,18 @@ func (noopAttestor) CollectEvidence(context.Context) (attestation.Evidence, erro
 	return attestation.Evidence{}, nil
 }
 
+// ptrAttestor has pointer receivers, so a nil *ptrAttestor is a typed-nil
+// value wrapped in a non-nil attestation.Attestor interface — the case
+// isNilAttestor must catch that a plain `== nil` check on the interface
+// would miss.
+type ptrAttestor struct{}
+
+func (*ptrAttestor) PluginName() string    { return "ptr" }
+func (*ptrAttestor) PluginVersion() string { return "1.0" }
+func (*ptrAttestor) CollectEvidence(context.Context) (attestation.Evidence, error) {
+	return attestation.Evidence{}, nil
+}
+
 func TestParseServerAddress(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -169,6 +181,21 @@ func TestNew_ExplicitClusterIDBeatsEnv(t *testing.T) {
 
 func TestNew_NoAttestorsConfigured(t *testing.T) {
 	_, err := New(context.Background(), WithTarget("passthrough:///bufnet"))
+	if !errors.Is(err, ErrNoAttestorsConfigured) {
+		t.Errorf("err = %v, want ErrNoAttestorsConfigured", err)
+	}
+}
+
+func TestNew_RejectsNilAttestor(t *testing.T) {
+	_, err := New(context.Background(), WithAttestors(nil), WithTarget("passthrough:///bufnet"))
+	if !errors.Is(err, ErrNoAttestorsConfigured) {
+		t.Errorf("err = %v, want ErrNoAttestorsConfigured", err)
+	}
+}
+
+func TestNew_RejectsTypedNilAttestor(t *testing.T) {
+	var a *ptrAttestor
+	_, err := New(context.Background(), WithAttestors(a), WithTarget("passthrough:///bufnet"))
 	if !errors.Is(err, ErrNoAttestorsConfigured) {
 		t.Errorf("err = %v, want ErrNoAttestorsConfigured", err)
 	}

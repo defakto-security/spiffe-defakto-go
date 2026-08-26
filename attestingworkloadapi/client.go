@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -100,6 +101,11 @@ func New(ctx context.Context, opts ...Option) (*Client, error) {
 	if len(cfg.attestors) == 0 {
 		return nil, ErrNoAttestorsConfigured
 	}
+	for _, a := range cfg.attestors {
+		if isNilAttestor(a) {
+			return nil, ErrNoAttestorsConfigured
+		}
+	}
 
 	target := cfg.target
 	if target == "" {
@@ -138,6 +144,19 @@ func New(ctx context.Context, opts ...Option) (*Client, error) {
 // Close releases the underlying gRPC channel.
 func (c *Client) Close() error {
 	return c.conn.Close()
+}
+
+// isNilAttestor reports whether a is nil: either the plain interface nil
+// from an empty WithAttestors entry, or a typed nil pointer (e.g.
+// (*awstoken.Attestor)(nil)) wrapped in a non-nil interface, which would
+// otherwise panic the first time collectAttestations calls CollectEvidence
+// on it.
+func isNilAttestor(a attestation.Attestor) bool {
+	if a == nil {
+		return true
+	}
+	v := reflect.ValueOf(a)
+	return v.Kind() == reflect.Pointer && v.IsNil()
 }
 
 // resolveTarget picks the gRPC dial target: an explicit/env server address
