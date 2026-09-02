@@ -29,6 +29,7 @@ kilroy:
 github:
   owner: defakto-security
   repo: spiffe-defakto-go
+  signed_commits: true
   issue_polling_interval: 5m
   issue_ready_label: ""
   issue_failed_label: ""
