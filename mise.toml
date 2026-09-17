@@ -1,7 +1,7 @@
 [tools]
 go = "1.27.1"
 golangci-lint = "2.13.2"
-protobuf = "36.1"
+protobuf = "36.2"
 
 [tasks.build]
 description = "Build the SDK"
