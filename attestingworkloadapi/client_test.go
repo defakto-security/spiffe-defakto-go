@@ -179,6 +179,24 @@ func TestNew_ExplicitClusterIDBeatsEnv(t *testing.T) {
 	}
 }
 
+func TestNew_ExplicitEmptyClusterIDBeatsEnv(t *testing.T) {
+	t.Setenv(envClusterID, "cluster-from-env")
+
+	c, err := New(context.Background(),
+		WithAttestors(noopAttestor{}),
+		WithClusterID(""),
+		WithTarget("passthrough:///bufnet"),
+		WithDialOptions(grpc.WithTransportCredentials(insecure.NewCredentials())),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer func() { _ = c.Close() }()
+	if c.clusterID != "" {
+		t.Errorf("clusterID = %q, want empty: explicit empty must not fall back to %s", c.clusterID, envClusterID)
+	}
+}
+
 func TestNew_NoAttestorsConfigured(t *testing.T) {
 	_, err := New(context.Background(), WithTarget("passthrough:///bufnet"))
 	if !errors.Is(err, ErrNoAttestorsConfigured) {

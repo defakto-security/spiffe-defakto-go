@@ -38,6 +38,7 @@ type config struct {
 	serverAddress string
 	trustDomainID string
 	clusterID     string
+	clusterIDSet  bool
 	target        string
 	dialOptions   []grpc.DialOption
 }
@@ -64,10 +65,14 @@ func WithTrustDomainID(id string) Option {
 }
 
 // WithClusterID overrides DEFAKTO_CLUSTER_ID, scoping issuance to a
-// specific serverless cluster's policy set. Empty selects the
-// trust-domain-scoped policy set.
+// specific serverless cluster's policy set. An explicit empty id selects
+// the trust-domain-scoped policy set and is honored as-is — it does not
+// fall back to DEFAKTO_CLUSTER_ID; only omitting this option does that.
 func WithClusterID(id string) Option {
-	return func(c *config) { c.clusterID = id }
+	return func(c *config) {
+		c.clusterID = id
+		c.clusterIDSet = true
+	}
 }
 
 // WithDialOptions overrides the gRPC dial options used to connect. Defaults
@@ -127,7 +132,7 @@ func New(ctx context.Context, opts ...Option) (*Client, error) {
 	}
 
 	clusterID := strings.TrimSpace(cfg.clusterID)
-	if clusterID == "" {
+	if !cfg.clusterIDSet {
 		clusterID = strings.TrimSpace(os.Getenv(envClusterID))
 	}
 
